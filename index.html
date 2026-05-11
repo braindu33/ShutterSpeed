@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Packard Shutter Tester Pro</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; text-align: center; background: #000; color: #fff; margin: 0; padding: 20px; }
+        #status { color: #ffcc00; font-weight: bold; margin-bottom: 10px; height: 20px; }
+        #result { font-size: 2.5em; margin: 30px 0; color: #00ff88; text-shadow: 0 0 10px rgba(0,255,136,0.5); }
+        .btn { padding: 20px 40px; font-size: 1.2em; border: none; border-radius: 50px; background: #007bff; color: white; cursor: pointer; transition: 0.3s; }
+        .btn:active { transform: scale(0.95); background: #0056b3; }
+        #preview { width: 120px; height: 120px; border-radius: 60px; object-fit: cover; margin: 20px auto; border: 2px solid #333; }
+    </style>
+</head>
+<body>
+    <h2>Testeur d'Obturateur</h2>
+    <video id="video" autoplay playsinline id="preview"></video>
+    <div id="status">Prêt</div>
+    <div id="result">-- ms</div>
+    <button class="btn" onclick="calibrate()">DÉMARRER LE TEST</button>
+    <canvas id="canvas" style="display:none;"></canvas>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const resultDiv = document.getElementById('result');
+        const statusDiv = document.getElementById('status');
+        
+        let threshold = 0;
+        let isTesting = false;
+        let startTime = 0;
+
+        async function calibrate() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: "environment", frameRate: { ideal: 120 } } 
+                });
+                video.srcObject = stream;
+                statusDiv.innerText = "CALIBRATION (Ne bougez pas)...";
+                
+                // On attend que la vidéo se lance
+                await new Promise(resolve => video.onloadedmetadata = resolve);
+                
+                // Mesure du niveau ambiant pendant 1.5s
+                setTimeout(() => {
+                    let total = 0;
+                    for(let i=0; i<10; i++) total += getLuma();
+                    threshold = (total / 10) + 30; // Seuil = Ambiant + marge de sécurité
+                    statusDiv.innerText = "PRÊT : Déclenchez l'obturateur !";
+                    isTesting = true;
+                    requestAnimationFrame(loop);
+                }, 1500);
+            } catch (e) { alert("Erreur caméra : " + e); }
+        }
+
+        function getLuma() {
+            canvas.width = 40; canvas.height = 40;
+            ctx.drawImage(video, 0, 0, 40, 40);
+            const d = ctx.getImageData(0, 0, 40, 40).data;
+            let luma = 0;
+            for (let i = 0; i < d.length; i += 4) luma += (d[i] + d[i+1] + d[i+2]) / 3;
+            return luma / (d.length / 4);
+        }
+
+        function loop() {
+            if (!isTesting) return;
+            let currentLuma = getLuma();
+
+            if (currentLuma > threshold && startTime === 0) {
+                startTime = performance.now();
+            } else if (currentLuma < threshold && startTime !== 0) {
+                let duration = performance.now() - startTime;
+                if (duration > 8) { // Ignore les flashs parasites < 8ms
+                    resultDiv.innerText = Math.round(duration) + "ms (1/" + Math.round(1000/duration) + "s)";
+                    statusDiv.innerText = "Mesuré ! Re-cliquez pour recommencer.";
+                    isTesting = false;
+                    startTime = 0;
+                }
+            }
+            if (isTesting) requestAnimationFrame(loop);
+        }
+    </script>
+</body>
+</html>
